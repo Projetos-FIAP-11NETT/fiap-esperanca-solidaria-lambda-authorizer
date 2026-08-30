@@ -1,0 +1,1 @@
+# fiap-esperanca-solidaria-lambda-authorizer
