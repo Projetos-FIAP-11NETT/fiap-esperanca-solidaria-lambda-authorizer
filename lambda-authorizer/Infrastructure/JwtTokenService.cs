@@ -36,8 +36,8 @@ public class JwtTokenService : IJwtTokenService
 
             if (string.IsNullOrEmpty(metadataAddress))
             {
-                // Fallback to the project's firebase id used previously
-                metadataAddress = "https://securetoken.google.com/fiapcloudgames-eaced/.well-known/openid-configuration";
+                // Fallback: projeto Firebase da Esperança Solidária
+                metadataAddress = "https://securetoken.google.com/esperancasolidaria/.well-known/openid-configuration";
             }
 
             _configurationManager = new ConfigurationManager<OpenIdConnectConfiguration>(
@@ -59,7 +59,7 @@ public class JwtTokenService : IJwtTokenService
 
             var handler = new JwtSecurityTokenHandler();
 
-            var projectId = Environment.GetEnvironmentVariable("FIREBASE_PROJECT_ID") ?? "fiapcloudgames-eaced";
+            var projectId = Environment.GetEnvironmentVariable("FIREBASE_PROJECT_ID") ?? "esperancasolidaria";
             var validIssuer = $"https://securetoken.google.com/{projectId}";
 
             var validationParameters = new TokenValidationParameters
