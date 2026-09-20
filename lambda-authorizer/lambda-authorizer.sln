@@ -2,7 +2,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FiapCloudGames.Lambda.Authorizer", "FiapCloudGames.Lambda.Authorizer.csproj", "{280730C0-D903-FF76-850C-6E8A1A516DF1}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FiapEsperancaSolidaria.Lambda.Authorizer", "FiapEsperancaSolidaria.Lambda.Authorizer.csproj", "{280730C0-D903-FF76-850C-6E8A1A516DF1}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
