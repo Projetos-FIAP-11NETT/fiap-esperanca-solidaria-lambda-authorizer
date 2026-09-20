@@ -1,197 +1,145 @@
-# Lambda Authorizer - Clean Architecture CQRS
+# Lambda Authorizer - Esperança Solidária
 
-Este projeto implementa um **Lambda Authorizer** para validação de tokens JWT e autorização de rotas no API Gateway (LocalStack).
+Lambda Authorizer (tipo **TOKEN**) do API Gateway. Valida o JWT emitido pelo Firebase
+(projeto `esperancasolidaria`) e decide, por **rota + método + papel**, se a requisição é liberada.
+
+Papéis existentes:
+
+| Papel | Quem é | Como chega no authorizer |
+|-------|--------|--------------------------|
+| deslogado | visitante | sem token (só acessa rotas `AllowAnonymous`) |
+| `Doador` | usuário logado | claim `role` do JWT |
+| `GestorONG` | administrador da ONG | claim `role` do JWT |
 
 ## Arquitetura
 
 ```
-FiapEsperancaSolidaria.Lambda.Authorizer/
+lambda-authorizer/
 ├── Domain/
-│   ├── AuthorizationRule.cs         # Regra de autorização
-│   └── AuthorizationResult.cs       # Resultado da validação
-├── Application/
-│   └── Queries/
-│       ├── AuthorizeTokenQuery.cs      # Query CQRS
-│       └── AuthorizeTokenQueryHandler.cs # Handler da Query
+│   ├── AuthorizationRule.cs          # Regra (método, path, papéis permitidos, anônimo)
+│   └── AuthorizationResult.cs        # Resultado da decisão
+├── Application/Queries/
+│   ├── AuthorizeTokenQuery.cs        # Token + método + path + apiId + stage
+│   └── AuthorizeTokenQueryHandler.cs # Decodifica token, extrai papéis, consulta as regras
 ├── Infrastructure/
-│   ├── IJwtTokenService.cs          # Interface para JWT
-│   ├── JwtTokenService.cs           # Implementação (valida JWT via JWKS do Firebase)
-│   ├── IAuthorizationRulesService.cs # Interface de regras
-│   ├── AuthorizationRulesService.cs  # Implementação das regras
-│   ├── IIamPolicyBuilder.cs         # Interface para policy
-│   └── IamPolicyBuilder.cs          # Implementação da policy
-├── Program.cs                       # Entry point e DI
-└── build.sh                         # Script de build
+│   ├── JwtTokenService.cs            # Valida o JWT via JWKS do Firebase (IJwtTokenService)
+│   ├── AuthorizationRulesService.cs  # Tabela de regras por rota/papel (IAuthorizationRulesService)
+│   └── IamPolicyBuilder.cs           # Monta a policy Allow/Deny + context (IIamPolicyBuilder)
+├── Program.cs                        # Entry point da Lambda (AuthorizerFunction.FunctionHandler)
+└── build-and-deploy.ps1              # Gera o function.zip e envia para o repo de infra
 ```
 
-## Como Funciona
+> `Infrastructure/MinimalJwtDecoder.cs` e `Infrastructure/RequestProxyFunction.cs` não são
+> usados por nenhum código e podem ser removidos.
 
-### 1. Fluxo de Autorização
+## Fluxo
 
 ```
-API Gateway (evento)
+API Gateway (methodArn + Authorization)
     ↓
-Lambda Authorizer (recebe token)
+Program.cs extrai apiId, stage, httpMethod e resourcePath do methodArn
     ↓
-JWT Token Service (decodifica token)
+AuthorizeTokenQueryHandler
+    ├─ JwtTokenService        → claims (ou null se token ausente/inválido)
+    ├─ papéis dos claims "role"/"roles"
+    └─ AuthorizationRulesService.IsAuthorized("<METHOD> <path>", papéis)
     ↓
-Authorization Rules Service (verifica permissões)
+IamPolicyBuilder → policy Allow/Deny (+ context com userId e roles)
     ↓
-IAM Policy Builder (constrói policy)
-    ↓
-API Gateway (Allow/Deny)
+API Gateway libera ou responde 403
 ```
 
-### 2. Regras de Autorização
+Sem regra correspondente = **Deny** (default deny). Token ausente/inválido só passa em rota `AllowAnonymous`.
 
-Definidas em `AuthorizationRulesService.InitializeRules()`:
+## Regras de autorização
 
-- **Catalog API**: GET público, POST/PUT/DELETE apenas admin
-- **Users API**: Admin only (GET, POST, PUT, DELETE)
-- **Payments API**: Autenticado (GET/POST), admin (PUT/DELETE)
-- **Notification API**: Autenticado (GET/POST), admin (DELETE)
-- **Health**: Endpoints públicos
+Definidas em `AuthorizationRulesService.InitializeRulesStatic()`. O `path` é o do recurso no
+API Gateway, **sem barra inicial** (ex.: `api/v1/campanhas`), e o `*` final casa por prefixo.
 
-### 3. Claims JWT Esperados
+| Método | Path | Quem acessa | Chega no Lambda? |
+|--------|------|-------------|------------------|
+| GET | `api/v1/campanhas` e `api/v1/campanhas/*` | deslogado | não (`authorization = NONE`) |
+| GET | `health` | deslogado | não (`NONE`) |
+| POST | `users/api/v1/User` (cadastro) | deslogado | não (`NONE`) |
+| POST | `users/api/v1/User/Login` | deslogado | não (`NONE`) |
+| POST | `api/v1/campanhas` | `GestorONG` | **sim** (`CUSTOM`) |
+| PUT | `api/v1/campanhas/*` | `GestorONG` | **sim** |
+| GET / DELETE | `users/api/v1/User/Session/*` | `Doador`, `GestorONG` | **sim** |
+| PUT | `users/api/v1/User/MakeGestorONG` | `GestorONG` | **sim** |
 
-O token deve conter:
+As linhas marcadas "não" já são liberadas direto no API Gateway; ficam na tabela só como defesa em profundidade.
+
+**Ao adicionar uma rota `CUSTOM` no `main.tf` do repo de infra, adicione a regra correspondente aqui**
+(hoje `Donation` ainda não tem recurso no API Gateway).
+
+### Claims esperados
 
 ```json
 {
-  "sub": "user-id",
-  "roles": ["user", "admin"],
-  "system_user_id": "guid-do-usuario",
-  ...outros claims
+  "sub": "id-do-usuario",
+  "role": "GestorONG"
 }
 ```
 
-## Build Local
+`role` (ou `roles`) pode ser string ou lista. A comparação de papel ignora maiúsculas/minúsculas.
+O `context` devolvido ao API Gateway contém `userId` e `roles` (separados por vírgula).
 
-### Pré-requisitos (Windows)
+## Configuração (variáveis de ambiente da Lambda)
 
-- **.NET SDK** instalado e disponível no `PATH` (comando `dotnet --version` precisa funcionar)
-- Para este projeto, o target é **`net8.0`** (Lambda `dotnet8`). Você pode ter só o **SDK 10** instalado e ainda assim compilar para `net8.0` (desde que os runtimes/packs do .NET 8 estejam disponíveis).
-- (Opcional) **Git Bash / WSL** se você quiser rodar o `create-api-gateway.sh` diretamente no Windows
-- Docker + LocalStack (seu fluxo do repositório)
+| Variável | Descrição |
+|----------|-----------|
+| `FIREBASE_PROJECT_ID` | Projeto Firebase. **Issuer** `https://securetoken.google.com/<id>` e **audience** `<id>`. Fallback no código: `esperancasolidaria` |
+| `JWKS_METADATA_ADDRESS` | (opcional) sobrescreve a URL do OpenID configuration usada para buscar as chaves |
 
-### Gerar `function.zip` (Windows)
+No Terraform (repo de infra) essas variáveis vêm de `firebase_project_id` e `jwks_metadata_address`
+do `terraform.tfvars` (não versionado). `ALLOW_DEV_STAGE_BYPASS` é lido apenas pelo Terraform, não pelo código C#.
 
-No PowerShell:
+## Build e deploy
 
-```powershell
-cd localstack-init\lambda-authorizer
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
-```
-
-Isso gera o pacote e copia para `localstack-init/function.zip` (arquivo usado pelo bootstrap do LocalStack).
-
-## Integração com API Gateway
-
-Quando `create-api-gateway.sh` é executado:
-
-1. Compila e empacota o Lambda
-2. Cria função Lambda no LocalStack
-3. Cria authorizer **TOKEN** baseado no Lambda
-4. Vincula authorizer a todas as rotas com `--authorization-type CUSTOM`
-
-## Desenvolvimento Local
-
-### Validação do token no Firebase (como funciona)
-
-O `JwtTokenService` valida o JWT **contra o JWKS do Firebase** obtido via OpenID Connect:
-
-- **Issuer** esperado: `https://securetoken.google.com/<FIREBASE_PROJECT_ID>`
-- **Audience** esperada: `<FIREBASE_PROJECT_ID>`
-- **Chaves**: `SigningKeys` retornadas pelo endpoint OpenID (`.well-known/openid-configuration`)
-
-Variáveis de ambiente suportadas:
-
-- `FIREBASE_PROJECT_ID` (**recomendado**): id do projeto Firebase (ex.: `fiapcloudgames-eaced`)
-- `JWKS_METADATA_ADDRESS` (opcional): sobrescreve a URL do OpenID configuration
-- `ALLOW_DEV_STAGE_BYPASS` (opcional): quando `true`, o script cria rotas com `authorization-type NONE` (sem authorizer)
-
-Em caso de token ausente/inválido, o authorizer retorna **policy IAM com Deny**, e o API Gateway **não chama** a integração do serviço.
-
-## Subir e testar no LocalStack
-
-### 1) Build do pacote
+Pré-requisitos: .NET SDK 10 e a ferramenta `Amazon.Lambda.Tools` (`dotnet tool install -g Amazon.Lambda.Tools`).
 
 ```powershell
-cd localstack-init\lambda-authorizer
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+cd lambda-authorizer
+.\build-and-deploy.ps1
+# ou, se o repo de infra não estiver ao lado deste:
+.\build-and-deploy.ps1 -InfraRepoPath "C:\caminho\fiap-esperanca-solidaria-infra"
 ```
 
-### 2) Subir o bootstrap do API Gateway/Authorizer
+O script empacota a Lambda (`dotnet lambda package`, target `net10.0`/`linux-x64`) e copia o
+`function.zip` para `fiap-esperanca-solidaria-infra/terraform/lambda-auth/function.zip`, lido pelas duas
+árvores Terraform. Em seguida, no repo de infra:
 
-O script de bootstrap fica em `localstack-init/create-api-gateway.sh` e precisa ser executado no ambiente que já sobe o LocalStack (normalmente dentro do container de init, ou via Git Bash/WSL).
+```powershell
+cd terraform\docker-compose   # ou terraform\k8s
+terraform apply
+```
 
-Exemplo via bash (Git Bash / WSL), a partir da raiz do repositório:
+Handler: `FiapEsperancaSolidaria.Lambda.Authorizer::FiapEsperancaSolidaria.Lambda.Authorizer.AuthorizerFunction::FunctionHandler` (runtime `dotnet10`).
+
+## Como testar (LocalStack)
 
 ```bash
-export FIREBASE_PROJECT_ID="fiapcloudgames-eaced"  # ajuste para o seu projeto
-export ALLOW_DEV_STAGE_BYPASS="false"
-bash localstack-init/create-api-gateway.sh
+BASE="http://localhost.localstack.cloud:4566/_aws/execute-api/<api_id>/dev"
+
+# rota pública: não invoca o authorizer
+curl -i "$BASE/health"
+
+# rota protegida sem token: 401 (o API Gateway barra antes de invocar a Lambda)
+curl -i -X POST "$BASE/api/v1/campanhas" -H "Content-Type: application/json" -d '{}'
+
+# rota protegida com token inválido: 403 (Lambda invocada e negou)
+curl -i -X POST "$BASE/api/v1/campanhas" -H "Authorization: Bearer invalido" -H "Content-Type: application/json" -d '{}'
 ```
 
-### 3) Teste rápido de token inválido
+Logs da Lambda no LocalStack (`Authorization refused: POST api/v1/campanhas (principal=anonymous).`):
 
-Na raiz `localstack-init`, rode:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\test-invalid-token.ps1
+```bash
+docker exec localstack sh -lc "awslocal logs describe-log-streams --log-group-name /aws/lambda/fiap-api-authorizer --order-by LastEventTime --descending --query 'logStreams[0].logStreamName' --output text"
 ```
 
-Se o token for inválido/ausente, o esperado é receber **403** (Deny) e o backend não é invocado.
+## Próximos passos
 
-### Modificar Regras
-
-Edite `AuthorizationRulesService.InitializeRules()` para adicionar/remover rotas.
-
-Exemplo (permitir leitura pública de catalog):
-
-```csharp
-new() { Method = "GET", Path = "/catalog*", AllowAnonymous = true },
-```
-
-## Testing
-
-A estrutura suporta testes unitários (adicionar `FiapEsperancaSolidaria.Lambda.Authorizer.Tests`):
-
-```csharp
-public class AuthorizeTokenQueryHandlerTests
-{
-    [Fact]
-    public async Task Should_Allow_Admin_To_Access_Catalog_Post()
-    {
-        // Arrange
-        var handler = new AuthorizeTokenQueryHandler(...);
-        var query = new AuthorizeTokenQuery 
-        { 
-            Token = "token-com-role-admin",
-            HttpMethod = "POST",
-            ResourcePath = "/catalog"
-        };
-
-        // Act
-        var result = await handler.Handle(query, CancellationToken.None);
-
-        // Assert
-        Assert.True(result.IsAuthorized);
-    }
-}
-```
-
-## Dependências
-
-- `Amazon.Lambda.Core` - SDK do Lambda
-- `System.IdentityModel.Tokens.Jwt` - Parse JWT
-- `MediatR` - CQRS
-- `Microsoft.Extensions.DependencyInjection` - DI
-
-## Próximos Passos
-
-- [ ] Ajustar gateway response (401/403) se quiser mensagens personalizadas
-- [ ] Implementar cache de autenticação (Redis)
-- [ ] Adicionar testes unitários
-- [ ] Centralizar regras em configuração (appsettings.json)
-- [ ] Log estruturado com Serilog
+- [ ] Testes unitários do `AuthorizationRulesService` e do `AuthorizeTokenQueryHandler`
+- [ ] Remover código morto (`MinimalJwtDecoder`, `RequestProxyFunction`)
+- [ ] Adicionar regras de `Donation` quando o recurso for exposto no API Gateway
+- [ ] Log estruturado
