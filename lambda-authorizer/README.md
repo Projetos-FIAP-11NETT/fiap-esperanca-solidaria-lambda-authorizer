@@ -66,11 +66,16 @@ API Gateway, **sem barra inicial** (ex.: `api/v1/campanhas`), e o `*` final casa
 | PUT | `api/v1/campanhas/*` | `GestorONG` | **sim** |
 | GET / DELETE | `users/api/v1/User/Session/*` | `Doador`, `GestorONG` | **sim** |
 | PUT | `users/api/v1/User/MakeGestorONG` | `GestorONG` | **sim** |
+| POST | `api/v1/doacoes` | `Doador` | **sim** |
+| GET | `api/v1/doacoes/me` | `Doador` | **sim** |
+| GET | `api/v1/doacoes/*` | `Doador`, `GestorONG` | **sim** |
 
 As linhas marcadas "não" já são liberadas direto no API Gateway; ficam na tabela só como defesa em profundidade.
+As regras de doação espelham o `DonationController` do `campanha-api`; `doacoes/me` vem antes de `doacoes/*`
+porque a primeira regra que casa vence.
 
 **Ao adicionar uma rota `CUSTOM` no `main.tf` do repo de infra, adicione a regra correspondente aqui**
-(hoje `Donation` ainda não tem recurso no API Gateway).
+(rota sem regra é negada).
 
 ### Claims esperados
 
@@ -141,5 +146,5 @@ docker exec localstack sh -lc "awslocal logs describe-log-streams --log-group-na
 
 - [ ] Testes unitários do `AuthorizationRulesService` e do `AuthorizeTokenQueryHandler`
 - [ ] Remover código morto (`MinimalJwtDecoder`, `RequestProxyFunction`)
-- [ ] Adicionar regras de `Donation` quando o recurso for exposto no API Gateway
+- [ ] Manter a tabela de regras sincronizada com o `main.tf` (hoje é manual)
 - [ ] Log estruturado
