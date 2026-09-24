@@ -60,12 +60,17 @@ API Gateway, **sem barra inicial** (ex.: `api/v1/campanhas`), e o `*` final casa
 |--------|------|-------------|------------------|
 | GET | `api/v1/campanhas` e `api/v1/campanhas/*` | deslogado | não (`authorization = NONE`) |
 | GET | `health` | deslogado | não (`NONE`) |
-| POST | `users/api/v1/User` (cadastro) | deslogado | não (`NONE`) |
+| POST | `users/api/v1/User/Doador` (cadastro de doador) | deslogado | não (`NONE`) |
 | POST | `users/api/v1/User/Login` | deslogado | não (`NONE`) |
-| GET | `api/v1/campanhas/gestao` (lista todas, qualquer status) | `GestorONG` | **sim** — rota ainda não criada no `main.tf` |
+| POST | `users/api/v1/User/RefreshToken` | deslogado | não (`NONE`) |
+| POST | `users/api/v1/User/images` | deslogado | não (`NONE`) |
+| GET | `api/v1/campanhas/gestao` (lista todas, qualquer status) | `GestorONG` | **sim** (`CUSTOM`) |
 | POST | `api/v1/campanhas` | `GestorONG` | **sim** (`CUSTOM`) |
-| POST | `api/v1/campanhas/*` (`images`, `{id}/cancel`) | `GestorONG` | **sim** — rotas ainda não criadas no `main.tf` |
+| POST | `api/v1/campanhas/*` (`images`, `{id}/cancel`) | `GestorONG` | **sim** (`CUSTOM`) |
 | PUT | `api/v1/campanhas/*` | `GestorONG` | **sim** |
+| POST | `users/api/v1/User/GestorONG` (cadastro de gestor) | `GestorONG` | **sim** |
+| PUT | `users/api/v1/User/Doador/{userId}` | `Doador` | **sim** |
+| PUT | `users/api/v1/User/GestorONG/{userId}` | `GestorONG` | **sim** |
 | GET / DELETE | `users/api/v1/User/Session/*` | `Doador`, `GestorONG` | **sim** |
 | PUT | `users/api/v1/User/MakeGestorONG` | `GestorONG` | **sim** |
 | POST | `api/v1/doacoes` | `Doador` | **sim** |
@@ -75,8 +80,10 @@ API Gateway, **sem barra inicial** (ex.: `api/v1/campanhas`), e o `*` final casa
 As linhas marcadas "não" já são liberadas direto no API Gateway; ficam na tabela só como defesa em profundidade.
 As regras de doação espelham o `DonationController` do `campanha-api`; `doacoes/me` vem antes de `doacoes/*`
 porque a primeira regra que casa vence — pelo mesmo motivo `campanhas/gestao` fica antes do `GET campanhas/*` anônimo.
-As regras de campanha do gestor espelham o `CampaignController` (`List`, `UploadImage`, `Cancel`); o gateway deve
-integrar `campanhas/gestao` → `Campaign`, `campanhas/images` → `Campaign/images` e `campanhas/{id}/cancel` → `Campaign/{id}/cancel`.
+As regras de campanha do gestor espelham o `CampaignController` (`List`, `UploadImage`, `Cancel`).
+O `UserController` não tem mais um `POST /User` único: cadastro e atualização são separados por papel
+(`Doador`/`GestorONG`), e existe `POST /User/RefreshToken`. `users/api/v1/User/images` ainda não existe
+no `usuario-api` publicado (branch em andamento) — a regra já está aqui como defesa em profundidade.
 
 **Ao adicionar uma rota `CUSTOM` no `main.tf` do repo de infra, adicione a regra correspondente aqui**
 (rota sem regra é negada).
