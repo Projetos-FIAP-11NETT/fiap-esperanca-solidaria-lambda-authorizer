@@ -62,7 +62,9 @@ API Gateway, **sem barra inicial** (ex.: `api/v1/campanhas`), e o `*` final casa
 | GET | `health` | deslogado | não (`NONE`) |
 | POST | `users/api/v1/User` (cadastro) | deslogado | não (`NONE`) |
 | POST | `users/api/v1/User/Login` | deslogado | não (`NONE`) |
+| GET | `api/v1/campanhas/gestao` (lista todas, qualquer status) | `GestorONG` | **sim** — rota ainda não criada no `main.tf` |
 | POST | `api/v1/campanhas` | `GestorONG` | **sim** (`CUSTOM`) |
+| POST | `api/v1/campanhas/*` (`images`, `{id}/cancel`) | `GestorONG` | **sim** — rotas ainda não criadas no `main.tf` |
 | PUT | `api/v1/campanhas/*` | `GestorONG` | **sim** |
 | GET / DELETE | `users/api/v1/User/Session/*` | `Doador`, `GestorONG` | **sim** |
 | PUT | `users/api/v1/User/MakeGestorONG` | `GestorONG` | **sim** |
@@ -72,7 +74,9 @@ API Gateway, **sem barra inicial** (ex.: `api/v1/campanhas`), e o `*` final casa
 
 As linhas marcadas "não" já são liberadas direto no API Gateway; ficam na tabela só como defesa em profundidade.
 As regras de doação espelham o `DonationController` do `campanha-api`; `doacoes/me` vem antes de `doacoes/*`
-porque a primeira regra que casa vence.
+porque a primeira regra que casa vence — pelo mesmo motivo `campanhas/gestao` fica antes do `GET campanhas/*` anônimo.
+As regras de campanha do gestor espelham o `CampaignController` (`List`, `UploadImage`, `Cancel`); o gateway deve
+integrar `campanhas/gestao` → `Campaign`, `campanhas/images` → `Campaign/images` e `campanhas/{id}/cancel` → `Campaign/{id}/cancel`.
 
 **Ao adicionar uma rota `CUSTOM` no `main.tf` do repo de infra, adicione a regra correspondente aqui**
 (rota sem regra é negada).

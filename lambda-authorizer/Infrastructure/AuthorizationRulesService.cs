@@ -61,15 +61,22 @@ public class AuthorizationRulesService : IAuthorizationRulesService
     // GET /api/v1/campanhas(/{id}), GET /health e os dois POST de users já são
     // authorization=NONE no API Gateway (nunca chegam a invocar esta Lambda) — as
     // regras abaixo para eles existem só como defesa em profundidade.
+    //
+    // GET api/v1/campanhas/gestao e POST api/v1/campanhas/* (images e {id}/cancel) antecipam
+    // rotas CUSTOM ainda não criadas no main.tf (CampaignController.List/UploadImage/Cancel).
+    // A primeira regra que casa vence: "gestao" precisa ficar antes do GET anônimo campanhas/*.
     private static List<AuthorizationRule> InitializeRulesStatic()
     {
         return
         [
+            new() { Method = "GET", Path = "api/v1/campanhas/gestao", AllowedRoles = ["GestorONG"] },
+
             new() { Method = "GET", Path = "api/v1/campanhas", AllowAnonymous = true },
             new() { Method = "GET", Path = "api/v1/campanhas/*", AllowAnonymous = true },
             new() { Method = "GET", Path = "health", AllowAnonymous = true },
 
             new() { Method = "POST", Path = "api/v1/campanhas", AllowedRoles = ["GestorONG"] },
+            new() { Method = "POST", Path = "api/v1/campanhas/*", AllowedRoles = ["GestorONG"] },
             new() { Method = "PUT", Path = "api/v1/campanhas/*", AllowedRoles = ["GestorONG"] },
 
             new() { Method = "POST", Path = "users/api/v1/User", AllowAnonymous = true },
