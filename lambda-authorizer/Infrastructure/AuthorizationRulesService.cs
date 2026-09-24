@@ -79,7 +79,7 @@ public class AuthorizationRulesService : IAuthorizationRulesService
             new() { Method = "POST", Path = "api/v1/campanhas/*", AllowedRoles = ["GestorONG"] },
             new() { Method = "PUT", Path = "api/v1/campanhas/*", AllowedRoles = ["GestorONG"] },
 
-            new() { Method = "POST", Path = "users/api/v1/User", AllowAnonymous = true },
+            new() { Method = "POST", Path = "users/api/v1/User/Doador", AllowAnonymous = true },
             new() { Method = "POST", Path = "users/api/v1/User/images", AllowAnonymous = true },
             new() { Method = "POST", Path = "users/api/v1/User/Login", AllowAnonymous = true },
             new() { Method = "GET", Path = "users/api/v1/User/Session/*", AllowedRoles = ["Doador", "GestorONG"] },
