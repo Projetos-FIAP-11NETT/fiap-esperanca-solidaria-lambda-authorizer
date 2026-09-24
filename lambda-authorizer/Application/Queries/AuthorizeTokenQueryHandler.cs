@@ -5,56 +5,48 @@ namespace FiapEsperancaSolidaria.Lambda.Authorizer.Application.Queries;
 
 public sealed class AuthorizeTokenQueryHandler
 (
-    IJwtTokenService jwtService
+    IJwtTokenService jwtService,
+    IAuthorizationRulesService rulesService
 )
 {
-    public async Task<AuthorizationResult> Handle(AuthorizeTokenQuery request)
+    public Task<AuthorizationResult> Handle(AuthorizeTokenQuery request)
     {
+        var routeKey = $"{request.HttpMethod} {request.ResourcePath}";
+
         try
         {
             var token = ExtractToken(request.Token);
 
-            if (string.IsNullOrEmpty(token))
-            {
-                return new AuthorizationResult
-                {
-                    PrincipalId = "user",
-                    IsAuthorized = false
-                };
-            }
+            // Sem token não é erro: pode ser rota AllowAnonymous (deslogado).
+            // A checagem de papel/rota é sempre feita pela AuthorizationRulesService.
+            Dictionary<string, object>? claims = string.IsNullOrEmpty(token)
+                ? null
+                : jwtService.DecodeToken(token);
 
-            var claims = jwtService.DecodeToken(token);
-            if (claims == null)
-            {
-                return new AuthorizationResult
-                {
-                    PrincipalId = "user",
-                    IsAuthorized = false
-                };
-            }
+            var userId = claims != null && claims.TryGetValue("sub", out object? value) ? value.ToString() : null;
+            var roles = claims != null ? ExtractRoles(claims) : [];
 
-            var userId = claims.TryGetValue("sub", out object? value) ? value.ToString() : "unknown";
-            var roles = ExtractRoles(claims);
+            var isAuthorized = rulesService.IsAuthorized(routeKey, roles);
 
-            return new AuthorizationResult
+            return Task.FromResult(new AuthorizationResult
             {
-                PrincipalId = userId ?? "user",
-                IsAuthorized = true,
+                PrincipalId = userId ?? "anonymous",
+                IsAuthorized = isAuthorized,
                 Context = new Dictionary<string, object>
                 {
                     { "userId", userId ?? "" },
                     { "roles", string.Join(",", roles) }
                 },
                 Roles = roles
-            };
+            });
         }
         catch
         {
-            return new AuthorizationResult
+            return Task.FromResult(new AuthorizationResult
             {
-                PrincipalId = "user",
+                PrincipalId = "anonymous",
                 IsAuthorized = false
-            };
+            });
         }
     }
 

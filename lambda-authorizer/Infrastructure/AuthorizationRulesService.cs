@@ -53,31 +53,43 @@ public class AuthorizationRulesService : IAuthorizationRulesService
         return string.Equals(rulePath, requestPath, StringComparison.OrdinalIgnoreCase);
     }
 
+    // Únicos papéis emitidos pelo Firebase (claim "role"): "Doador" (usuário logado) e
+    // "GestorONG" (admin). Ausência de token = deslogado, coberto por AllowAnonymous.
+    //
+    // Espelha exatamente os recursos hoje criados em
+    // fiap-esperanca-solidaria-infra/terraform/{k8s,docker-compose}/main.tf.
+    // GET /api/v1/campanhas(/{id}), GET /health e os dois POST de users já são
+    // authorization=NONE no API Gateway (nunca chegam a invocar esta Lambda) — as
+    // regras abaixo para eles existem só como defesa em profundidade.
+    //
+    // GET api/v1/campanhas/gestao e POST api/v1/campanhas/* (images e {id}/cancel) antecipam
+    // rotas CUSTOM ainda não criadas no main.tf (CampaignController.List/UploadImage/Cancel).
+    // A primeira regra que casa vence: "gestao" precisa ficar antes do GET anônimo campanhas/*.
     private static List<AuthorizationRule> InitializeRulesStatic()
     {
         return
         [
-            // Catalog API - public read, authenticated write
-            new() { Method = "GET", Path = "/catalog*", AllowedRoles = ["user", "admin"], AllowAnonymous = true },
-            new() { Method = "POST", Path = "/catalog*", AllowedRoles = ["admin"] },
-            new() { Method = "PUT", Path = "/catalog*", AllowedRoles = ["admin"] },
-            new() { Method = "DELETE", Path = "/catalog*", AllowedRoles = ["admin"] },
+            new() { Method = "GET", Path = "api/v1/campanhas/gestao", AllowedRoles = ["GestorONG"] },
 
-            // Users API - admin only
-            new() { Method = "GET", Path = "/users*", AllowedRoles = ["admin"] },
-            new() { Method = "POST", Path = "/users*", AllowedRoles = ["admin"] },
-            new() { Method = "PUT", Path = "/users*", AllowedRoles = ["admin"] },
-            new() { Method = "DELETE", Path = "/users*", AllowedRoles = ["admin"] },
+            new() { Method = "GET", Path = "api/v1/campanhas", AllowAnonymous = true },
+            new() { Method = "GET", Path = "api/v1/campanhas/*", AllowAnonymous = true },
+            new() { Method = "GET", Path = "health", AllowAnonymous = true },
 
-            // Payments API - authenticated users
-            new() { Method = "GET", Path = "/payments*", AllowedRoles = ["user", "admin"] },
-            new() { Method = "POST", Path = "/payments*", AllowedRoles = ["user", "admin"] },
-            new() { Method = "PUT", Path = "/payments*", AllowedRoles = ["admin"] },
-            new() { Method = "DELETE", Path = "/payments*", AllowedRoles = ["admin"] },
+            new() { Method = "POST", Path = "api/v1/campanhas", AllowedRoles = ["GestorONG"] },
+            new() { Method = "POST", Path = "api/v1/campanhas/*", AllowedRoles = ["GestorONG"] },
+            new() { Method = "PUT", Path = "api/v1/campanhas/*", AllowedRoles = ["GestorONG"] },
 
-            // Health/public endpoints
-            new() { Method = "GET", Path = "/health", AllowAnonymous = true },
-            new() { Method = "GET", Path = "/ready", AllowAnonymous = true },
+            new() { Method = "POST", Path = "users/api/v1/User/Doador", AllowAnonymous = true },
+            new() { Method = "POST", Path = "users/api/v1/User/images", AllowAnonymous = true },
+            new() { Method = "POST", Path = "users/api/v1/User/Login", AllowAnonymous = true },
+            new() { Method = "POST", Path = "users/api/v1/User/RefreshToken", AllowAnonymous = true },
+            new() { Method = "GET", Path = "users/api/v1/User/Session/*", AllowedRoles = ["Doador", "GestorONG"] },
+            new() { Method = "DELETE", Path = "users/api/v1/User/Session/*", AllowedRoles = ["Doador", "GestorONG"] },
+            new() { Method = "PUT", Path = "users/api/v1/User/MakeGestorONG", AllowedRoles = ["GestorONG"] },
+
+            new() { Method = "POST", Path = "api/v1/doacoes", AllowedRoles = ["Doador"] },
+            new() { Method = "GET", Path = "api/v1/doacoes/me", AllowedRoles = ["Doador"] },
+            new() { Method = "GET", Path = "api/v1/doacoes/*", AllowedRoles = ["Doador", "GestorONG"] },
         ];
     }
 }

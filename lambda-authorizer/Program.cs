@@ -1,5 +1,6 @@
 using Amazon.Lambda.Core;
 using Amazon.Lambda.Serialization.SystemTextJson;
+using FiapEsperancaSolidaria.Lambda.Authorizer.Application.Queries;
 using FiapEsperancaSolidaria.Lambda.Authorizer.Infrastructure;
 using System.Text.Json;
 
@@ -9,7 +10,8 @@ namespace FiapEsperancaSolidaria.Lambda.Authorizer;
 
 public class AuthorizerFunction
 {
-    private static readonly JwtTokenService JwtService = new();
+    private static readonly AuthorizeTokenQueryHandler Handler = new(new JwtTokenService(), new AuthorizationRulesService());
+    private static readonly IamPolicyBuilder PolicyBuilder = new();
 
     public static Dictionary<string, object> FunctionHandler(Dictionary<string, object> @event, ILambdaContext context)
     {
@@ -22,43 +24,39 @@ public class AuthorizerFunction
         {
             authorizationToken = ExtractAuthorizationHeader(@event);
         }
+
+        // methodArn: arn:aws:execute-api:{region}:{account}:{apiId}/{stage}/{httpMethod}/{resourcePath}
         var arnParts = methodArn.Split(':');
-        var resourceParts = arnParts.Length > 5 ? arnParts[5].Split('/') : ["", "", "", ""];
+        var resourceParts = arnParts.Length > 5 ? arnParts[5].Split('/') : [];
         var apiId = resourceParts.Length > 0 ? resourceParts[0] : "";
         var stage = resourceParts.Length > 1 ? resourceParts[1] : "";
+        var httpMethod = resourceParts.Length > 2 ? resourceParts[2] : "";
+        var resourcePath = resourceParts.Length > 3 ? string.Join("/", resourceParts[3..]) : "";
 
         try
         {
-            var token = ExtractToken(authorizationToken);
-
-            if (string.IsNullOrEmpty(token))
+            var query = new AuthorizeTokenQuery
             {
-                context.Logger.LogLine("Authorization refused: missing or empty Bearer token.");
-                return BuildDenyPolicy("unauthorized-user", methodArn);
-            }
-
-            var claims = JwtService.DecodeToken(token);
-            if (claims == null)
-            {
-                context.Logger.LogLine("Authorization refused: Firebase token validation failed.");
-                return BuildDenyPolicy("unauthorized-user", methodArn);
-            }
-
-            var userId = claims.TryGetValue("sub", out object? value) ? value.ToString() : "unknown";
-            var roles = ExtractRoles(claims);
-
-            var contextData = new Dictionary<string, object>
-            {
-                { "userId", userId ?? "" },
-                { "roles", string.Join(",", roles) }
+                Token = authorizationToken,
+                HttpMethod = httpMethod,
+                ResourcePath = resourcePath,
+                ApiId = apiId,
+                Stage = stage
             };
 
-            return BuildAllowPolicy(userId ?? "user", apiId, stage, contextData);
+            var result = Handler.Handle(query).GetAwaiter().GetResult();
+
+            if (!result.IsAuthorized)
+            {
+                context.Logger.LogLine($"Authorization refused: {httpMethod} {resourcePath} (principal={result.PrincipalId}).");
+            }
+
+            return PolicyBuilder.BuildPolicy(result.PrincipalId, result.IsAuthorized, apiId, stage, methodArn, result.Context);
         }
         catch (Exception ex)
         {
             context.Logger.LogLine($"Authorization error: {ex.Message}");
-            return BuildDenyPolicy("error", methodArn);
+            return PolicyBuilder.BuildPolicy("error", false, apiId, stage, methodArn);
         }
     }
 
@@ -95,92 +93,6 @@ public class AuthorizerFunction
             JsonElement je => je.ToString(),
             _ => value.ToString() ?? ""
         };
-    }
-
-    private static string ExtractToken(string authorizationHeader)
-    {
-        if (string.IsNullOrEmpty(authorizationHeader))
-            return string.Empty;
-
-        const string bearer = "Bearer ";
-        if (authorizationHeader.StartsWith(bearer, StringComparison.OrdinalIgnoreCase))
-            return authorizationHeader[bearer.Length..];
-
-        return authorizationHeader;
-    }
-
-    private static List<string> ExtractRoles(Dictionary<string, object> claims)
-    {
-        if (claims.TryGetValue("roles", out var rolesObj))
-            return NormalizeRolesList(rolesObj);
-
-        if (claims.TryGetValue("role", out var roleObj))
-            return NormalizeRolesList(roleObj);
-
-        return [];
-    }
-
-    private static List<string> NormalizeRolesList(object? rolesObj)
-    {
-        if (rolesObj == null)
-            return [];
-
-        if (rolesObj is System.Collections.IEnumerable enumerable && rolesObj is not string)
-        {
-            return [.. enumerable.Cast<object>().Select(r => r?.ToString() ?? "").Where(r => !string.IsNullOrEmpty(r))];
-        }
-
-        var rolesStr = rolesObj?.ToString() ?? "";
-        return string.IsNullOrEmpty(rolesStr) ? [] : [rolesStr];
-    }
-
-    private static Dictionary<string, object> BuildDenyPolicy(string principalId, string methodArn)
-    {
-        var resource = string.IsNullOrEmpty(methodArn) ? "*" : methodArn;
-        return new Dictionary<string, object>
-        {
-            { "principalId", principalId },
-            { "policyDocument", new Dictionary<string, object>
-                {
-                    { "Version", "2012-10-17" },
-                    { "Statement", new List<Dictionary<string, object>>
-                        {
-                            new()
-                            {
-                                { "Action", "execute-api:Invoke" },
-                                { "Effect", "Deny" },
-                                { "Resource", resource }
-                            }
-                        }
-                    }
-                }
-            }
-        };
-    }
-
-    private static Dictionary<string, object> BuildAllowPolicy(string principalId, string apiId, string stage, Dictionary<string, object> context)
-    {
-        var policy = new Dictionary<string, object>
-        {
-            { "principalId", principalId },
-            { "policyDocument", new Dictionary<string, object>
-                {
-                    { "Version", "2012-10-17" },
-                    { "Statement", new List<Dictionary<string, object>>
-                        {
-                            new()
-                            {
-                                { "Action", "execute-api:Invoke" },
-                                { "Effect", "Allow" },
-                                { "Resource", $"arn:aws:execute-api:*:*:{apiId}/{stage}/*/*" }
-                            }
-                        }
-                    }
-                }
-            },
-            { "context", context }
-        };
-        return policy;
     }
 
 }
