@@ -58,9 +58,14 @@ public class AuthorizationRulesService : IAuthorizationRulesService
     //
     // Espelha exatamente os recursos hoje criados em
     // fiap-esperanca-solidaria-infra/terraform/{k8s,docker-compose}/main.tf.
-    // GET /api/v1/campanhas(/{id}), GET /health e os dois POST de users já são
-    // authorization=NONE no API Gateway (nunca chegam a invocar esta Lambda) — as
-    // regras abaixo para eles existem só como defesa em profundidade.
+    // GET /api/v1/campanhas(/{id}), GET /health, POST users/api/v1/User/Doador e
+    // POST .../Login e .../RefreshToken já são authorization=NONE no API Gateway (nunca
+    // chegam a invocar esta Lambda) — as regras abaixo para eles existem só como defesa
+    // em profundidade.
+    //
+    // UserController agora separa cadastro/atualização por papel: POST .../User/Doador
+    // (público) e POST .../User/GestorONG (só GestorONG, pra promover outro gestor) criam
+    // conta; PUT .../User/Doador/{userId} e PUT .../User/GestorONG/{userId} atualizam.
     //
     // GET api/v1/campanhas/gestao e POST api/v1/campanhas/* (images e {id}/cancel) antecipam
     // rotas CUSTOM ainda não criadas no main.tf (CampaignController.List/UploadImage/Cancel).
@@ -80,6 +85,9 @@ public class AuthorizationRulesService : IAuthorizationRulesService
             new() { Method = "PUT", Path = "api/v1/campanhas/*", AllowedRoles = ["GestorONG"] },
 
             new() { Method = "POST", Path = "users/api/v1/User/Doador", AllowAnonymous = true },
+            new() { Method = "POST", Path = "users/api/v1/User/GestorONG", AllowedRoles = ["GestorONG"] },
+            new() { Method = "PUT", Path = "users/api/v1/User/Doador/*", AllowedRoles = ["Doador"] },
+            new() { Method = "PUT", Path = "users/api/v1/User/GestorONG/*", AllowedRoles = ["GestorONG"] },
             new() { Method = "POST", Path = "users/api/v1/User/images", AllowAnonymous = true },
             new() { Method = "POST", Path = "users/api/v1/User/Login", AllowAnonymous = true },
             new() { Method = "POST", Path = "users/api/v1/User/RefreshToken", AllowAnonymous = true },
