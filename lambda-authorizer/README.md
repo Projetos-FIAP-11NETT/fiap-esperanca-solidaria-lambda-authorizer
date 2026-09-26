@@ -8,8 +8,8 @@ Papéis existentes:
 | Papel | Quem é | Como chega no authorizer |
 |-------|--------|--------------------------|
 | deslogado | visitante | sem token (só acessa rotas `AllowAnonymous`) |
-| `Doador` | usuário logado | claim `role` do JWT |
-| `GestorONG` | administrador da ONG | claim `role` do JWT |
+| `Doador` | usuário logado | claim `roles` do JWT (gravada pelo `usuario-api`) |
+| `GestorONG` | administrador da ONG | claim `roles` do JWT (gravada pelo `usuario-api`) |
 
 ## Arquitetura
 
@@ -82,8 +82,8 @@ As regras de doação espelham o `DonationController` do `campanha-api`; `doacoe
 porque a primeira regra que casa vence — pelo mesmo motivo `campanhas/gestao` fica antes do `GET campanhas/*` anônimo.
 As regras de campanha do gestor espelham o `CampaignController` (`List`, `UploadImage`, `Cancel`).
 O `UserController` não tem mais um `POST /User` único: cadastro e atualização são separados por papel
-(`Doador`/`GestorONG`), e existe `POST /User/RefreshToken`. `users/api/v1/User/images` ainda não existe
-no `usuario-api` publicado (branch em andamento) — a regra já está aqui como defesa em profundidade.
+(`Doador`/`GestorONG`), e existem `POST /User/RefreshToken` e `POST /User/images` (upload anônimo da foto
+de perfil, usado no cadastro).
 
 **Ao adicionar uma rota `CUSTOM` no `main.tf` do repo de infra, adicione a regra correspondente aqui**
 (rota sem regra é negada).
@@ -93,11 +93,11 @@ no `usuario-api` publicado (branch em andamento) — a regra já está aqui como
 ```json
 {
   "sub": "id-do-usuario",
-  "role": "GestorONG"
+  "roles": ["GestorONG"]
 }
 ```
 
-`role` (ou `roles`) pode ser string ou lista. A comparação de papel ignora maiúsculas/minúsculas.
+O `usuario-api` grava a custom claim `roles` como lista; o handler também aceita `role` e valores em string. A comparação de papel ignora maiúsculas/minúsculas.
 O `context` devolvido ao API Gateway contém `userId` e `roles` (separados por vírgula).
 
 ## Configuração (variáveis de ambiente da Lambda)
@@ -155,6 +155,7 @@ docker exec localstack sh -lc "awslocal logs describe-log-streams --log-group-na
 
 ## Próximos passos
 
+- [ ] Script de LocalStack usa `docker exec localstack`; no k8s use `kubectl exec -n localstack deploy/localstack -- awslocal ...`
 - [ ] Testes unitários do `AuthorizationRulesService` e do `AuthorizeTokenQueryHandler`
 - [ ] Remover código morto (`MinimalJwtDecoder`, `RequestProxyFunction`)
 - [ ] Manter a tabela de regras sincronizada com o `main.tf` (hoje é manual)
